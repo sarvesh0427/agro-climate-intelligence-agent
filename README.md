@@ -1,4 +1,4 @@
-# 🌱 Agro-Climate Intelligence Agent
+# Agro-Climate Intelligence Agent
 
 ### Production-Grade Multi-Agent Decision Framework for Sustainable Agriculture
 
@@ -21,6 +21,61 @@ Smallholder farmers and local agricultural coordinators face immense friction wh
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 Our solution is engineered around three core course pillars to ensure modularity, scalability, and security:
+
+```text
+                  [ User Input / Streamlit UI ]
+                               │
+                               ▼
+            ┌──────────────────────────────────────┐
+            │     Security Guardrail Agent         │
+            │  (Regex & Prompt Injection Audit)    │
+            └──────────────────┬───────────────────┘
+                               │
+                       [ Cleared Input ]
+                               │
+                               ▼
+            ┌──────────────────────────────────────┐
+            │       Coordinator Agent (ADK)        │
+            └──────────────────┬───────────────────┘
+                               │
+                     [ Orchestrates Tools ]
+                               │
+                               ▼
+            ┌──────────────────────────────────────┐
+            │      FastMCP Analytics Server        │
+            │     (Safe Parameterized SQL)         │
+            └──────────────────────────────────────┘
+```
+
+### Key Concepts Demonstrated:
+1. **Multi-Agent Coordination (ADK):** Utilizing an Orchestrator pattern where a specialized *Security Guardrail Agent* pre-screens constraints before handing off tasks to the *AgroCoordinator Agent*.
+2. **Model Context Protocol (FastMCP):** Isolation of data retrieval tasks into an independent, typed tool server (`app_mcp.py`) utilizing strict Pydantic validation schemas.
+3. **Enterprise Security Gating:** Protects infrastructure from prompt injections and SQL execution anomalies using defensive input validation and parameterized data lookups.
+
+---
+
+## Tech Stack & Agent Skills
+* **Agent Framework:** Antigravity ADK & Agents CLI patterns.
+* **Tool Interface:** FastMCP (Model Context Protocol).
+* **Frontend Dashboard:** Streamlit (Python).
+* **Database Layer:** Mock SQL Ecosystem (SQLite parameterized backend).
+
+---
+
+## Setup & Installation Instructions
+
+Ensure you have Python 3.10+ installed on your system.
+
+### 1. Initialize the Environment
+```bash
+# Navigate to the cloned repository
+cd agro-climate-intelligence-agent
+
+# Activate your virtual environment (if not already done)
+# For Windows:
+venv\Scripts\activate
+# For macOS/Linux:
+source venv/bin/bin/activate
