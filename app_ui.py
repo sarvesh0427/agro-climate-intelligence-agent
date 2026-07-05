@@ -2,7 +2,7 @@
 import streamlit as st
 
 from agro_agent.config import get_settings
-from agro_agent.crop_rules import crop_profile_hint, normalize_crop
+from agro_agent.crop_rules import crop_profile_hint, get_crop_list, resolve_crop_profile
 from agro_agent import farms
 from agro_agent import plan_history
 from agro_agent.geocode import forward_geocode, reverse_geocode
@@ -35,6 +35,12 @@ from agro_agent.runner import run_agro_workflow
 DEFAULT_CENTER = (27.7172, 85.3240)  # Kathmandu
 DEFAULT_ZOOM = 11
 MAP_HEIGHT = 360
+CROP_OPTIONS = get_crop_list()
+
+
+def _canonical_crop(crop: str) -> str:
+    profile_name, _ = resolve_crop_profile(crop)
+    return profile_name
 
 
 def _init_session_state() -> None:
@@ -104,7 +110,7 @@ def _apply_custom_location(
     st.session_state.loaded_farm_id = None
     st.session_state.location_source = source
     if crop is not None:
-        st.session_state.active_crop = normalize_crop(crop)
+        st.session_state.active_crop = _canonical_crop(crop)
     if radius_m is not None:
         st.session_state.active_radius_m = float(radius_m)
     if place_name is not None:
@@ -528,12 +534,15 @@ with control_col:
 
 with farm_col:
     st.subheader("Crop & field")
-    active_crop = st.text_input(
+    current_crop = _canonical_crop(st.session_state.active_crop)
+    st.session_state.active_crop = current_crop
+    active_crop = st.selectbox(
         "Crop",
-        value=st.session_state.active_crop,
+        options=CROP_OPTIONS,
+        index=CROP_OPTIONS.index(current_crop),
     )
-    st.session_state.active_crop = normalize_crop(active_crop)
-    st.caption(crop_profile_hint(st.session_state.active_crop))
+    st.session_state.active_crop = active_crop
+    st.caption(crop_profile_hint(active_crop))
 
     active_radius = st.number_input(
         "Field radius (meters)",
