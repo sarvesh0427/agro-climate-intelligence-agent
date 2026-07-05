@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fpdf import FPDF
-from fpdf.enums import XPos, YPos
 
 from agro_agent.crop_rules import suggested_irrigation_mm, mm_to_liters
 from agro_agent.regions import ONE_TIME_GPS_REGION_ID
