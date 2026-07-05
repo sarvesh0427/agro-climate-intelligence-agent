@@ -16,11 +16,18 @@ dependencies = [
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
     "streamlit>=1.30",
+    "streamlit-folium>=0.25",
     "streamlit-geolocation>=0.0.10",
+    "fpdf2>=2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
 ]
 
 [tool.setuptools.packages.find]
 include = ["agro_agent*"]
 
 [tool.setuptools.package-data]
-agro_agent = ["data/*.json"]
+agro_agent = ["components/geolocation_link/*"]

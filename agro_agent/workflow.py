@@ -25,21 +25,24 @@ Your job is to translate soil and environmental metrics into practical, safe irr
 strategies for local farmers.
 
 Context for this request:
-- Region mode: {region_mode}
-- Region: {region_name} ({region_id})
-- District / location: {region_district}
-- Crop: {crop}
+- Location: {region_name} ({region_district})
 - Coordinates: latitude {latitude}, longitude {longitude}
+- Crop: {crop}
 - Farmer strategy request: {user_intent}
 
 Required steps:
-- If region_mode is "custom": call fetch_location_metrics with latitude, longitude, and crop.
-- If region_mode is "registry": call fetch_agro_metrics with region_id "{region_id}".
-- If the farmer strategy mentions days or multi-day planning, also call get_weather_forecast
-  with latitude, longitude, and an appropriate number of days (default 3).
-- Analyze soil moisture, temperature, crop type, and baseline urgency from tool output.
-- Honor the farmer's strategy request when forming recommendations.
-- Produce a concise irrigation plan.
+1. Call fetch_location_metrics with latitude, longitude, and crop.
+2. If the farmer strategy mentions days or multi-day planning, also call get_weather_forecast
+   with latitude, longitude, and an appropriate number of days (default 3).
+3. Analyze soil moisture, temperature, crop type, and baseline urgency from tool output.
+4. Honor the farmer's strategy request when forming recommendations.
+5. Produce a concise irrigation plan.
+
+Output requirements (mandatory):
+- reasoning: at least 2 complete sentences for the farmer.
+- actions: at least 2 concrete, specific irrigation steps (not empty).
+- risks: at least 1 risk when urgency is HIGH or MEDIUM.
+- irrigation_urgency: HIGH, MEDIUM, or LOW aligned with tool output.
 
 Safety rules:
 - Never invent metrics; only use tool output.
@@ -57,11 +60,7 @@ def _build_mcp_toolset(settings: Settings) -> McpToolset:
             ),
             timeout=30.0,
         ),
-        tool_filter=[
-            "fetch_agro_metrics",
-            "fetch_location_metrics",
-            "get_weather_forecast",
-        ],
+        tool_filter=["fetch_location_metrics", "get_weather_forecast"],
     )
 
 

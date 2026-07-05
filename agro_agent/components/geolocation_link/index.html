@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+      }
+      #gps-link {
+        background: none;
+        border: none;
+        padding: 0;
+        margin: 0;
+        color: #4dabf7;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 400;
+        text-decoration: underline;
+        font-family: "Source Sans Pro", sans-serif;
+        line-height: 1.6;
+        white-space: nowrap;
+      }
+      #gps-link:hover {
+        color: #74c0fc;
+      }
+      #gps-link:disabled {
+        opacity: 0.7;
+        cursor: wait;
+      }
+    </style>
+  </head>
+  <body>
+    <button id="gps-link" type="button">Use current location</button>
+    <script>
+      const Streamlit = {
+        setComponentValue(value) {
+          window.parent.postMessage(
+            {
+              isStreamlitMessage: true,
+              type: "streamlit:setComponentValue",
+              value,
+            },
+            "*"
+          );
+        },
+        setFrameHeight(height) {
+          window.parent.postMessage(
+            {
+              isStreamlitMessage: true,
+              type: "streamlit:setFrameHeight",
+              height,
+            },
+            "*"
+          );
+        },
+        setComponentReady() {
+          window.parent.postMessage(
+            {
+              isStreamlitMessage: true,
+              type: "streamlit:componentReady",
+              apiVersion: 1,
+            },
+            "*"
+          );
+        },
+      };
+
+      const btn = document.getElementById("gps-link");
+      let label = "Use current location";
+
+      function setLabel(nextLabel) {
+        if (nextLabel) {
+          label = nextLabel;
+        }
+        btn.textContent = label;
+      }
+
+      window.addEventListener("message", (event) => {
+        const data = event.data;
+        if (!data || data.type !== "streamlit:render") {
+          return;
+        }
+        setLabel((data.args && data.args.label) || label);
+        Streamlit.setFrameHeight(34);
+      });
+
+      btn.addEventListener("click", () => {
+        if (!navigator.geolocation) {
+          Streamlit.setComponentValue({
+            error: "Geolocation is not supported in this browser.",
+          });
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = "Getting location...";
+
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            btn.disabled = false;
+            setLabel(label);
+            Streamlit.setComponentValue({
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+            });
+          },
+          (err) => {
+            btn.disabled = false;
+            setLabel(label);
+            Streamlit.setComponentValue({
+              error: err.message || "Location permission denied.",
+            });
+          }
+        );
+      });
+
+      setLabel(label);
+      Streamlit.setFrameHeight(34);
+      Streamlit.setComponentReady();
+    </script>
+  </body>
+</html>

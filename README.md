@@ -4,14 +4,7 @@
 
 [![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Built with Antigravity](https://img.shields.io/badge/Framework-Antigravity%20ADK-green)](https://www.kaggle.com/competitions/vibecoding-agents-capstone-project)
-
----
-
-## Submission Deliverables
-
-* **Project Writeup & Code Deployment:** Available via the Kaggle Notebook Platform.
-* **YouTube Video Demonstration (5-Min Pitch):** coming soon
-* **Production Code Base:** Hosted in this GitHub Repository.
+[![CI](https://github.com/sarvesh0427/agro-climate-intelligence-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/sarvesh0427/agro-climate-intelligence-agent/actions/workflows/ci.yml)
 
 ---
 
@@ -19,7 +12,7 @@
 
 Smallholder farmers and local agricultural coordinators face immense friction when translating raw, fragmented climate and soil metrics into timely irrigation plans. Static dashboards fail to offer actionable reasoning, leading to either water wastage or crop failure.
 
-**The Solution:** The **Agro-Climate Intelligence Agent** leverages a secure multi-agent architecture to autonomously ingest authenticated environmental data via a standardized Model Context Protocol (MCP) server, apply safety guardrails against malicious inputs, and synthesize localized, high-urgency irrigation strategies with **Google Gemini** via **ADK 2.0**.
+**The Solution:** The **Agro-Climate Intelligence Agent** leverages a secure multi-agent architecture to ingest **live global weather** via Open-Meteo (MCP), apply safety guardrails against malicious inputs, and synthesize localized irrigation strategies with **Google Gemini** via **ADK 2.0**.
 
 ---
 
@@ -31,7 +24,7 @@ Smallholder farmers and local agricultural coordinators face immense friction wh
                                ▼
             ┌──────────────────────────────────────┐
             │  security_screen (ADK FunctionNode)    │
-            │  Regex & Prompt Injection Audit        │
+            │  Prompt injection + coordinate audit   │
             └──────────────────┬───────────────────┘
                                │
                        [ Cleared Input ]
@@ -45,16 +38,9 @@ Smallholder farmers and local agricultural coordinators face immense friction wh
                                │
                                ▼
             ┌──────────────────────────────────────┐
-            │      FastMCP Analytics Server        │
-            │     (Safe Parameterized SQL)         │
+            │      FastMCP + Open-Meteo API        │
             └──────────────────────────────────────┘
 ```
-
-### Key Concepts Demonstrated
-
-1. **Multi-Agent Coordination (ADK 2.0):** Graph workflow with a deterministic guardrail node routing to a Gemini coordinator agent.
-2. **Model Context Protocol (FastMCP):** Real stdio MCP connection via ADK `McpToolset` to `app_mcp.py`.
-3. **Enterprise Security Gating:** Prompt injection blocklist, region format validation, and parameterized SQL lookups.
 
 ---
 
@@ -63,8 +49,11 @@ Smallholder farmers and local agricultural coordinators face immense friction wh
 * **Agent Framework:** Google ADK 2.0 (`google-adk>=2.0`)
 * **LLM:** Google Gemini (`GOOGLE_API_KEY`)
 * **Tool Interface:** FastMCP (Model Context Protocol)
-* **Frontend:** Streamlit
-* **Database:** Mock SQLite (in-memory, parameterized)
+* **Weather:** Open-Meteo (live, no API key)
+* **Frontend:** Streamlit + streamlit-folium
+* **Persistence:** SQLite (`data/custom_farms.db` — farms + plan history)
+* **Export:** Markdown + PDF reports (`fpdf2`)
+* **Tests:** pytest + GitHub Actions CI
 
 ---
 
@@ -73,20 +62,12 @@ Smallholder farmers and local agricultural coordinators face immense friction wh
 Requires **Python 3.11+**.
 
 ```bash
-# Clone and enter the repository
 cd agro-climate-intelligence-agent
-
-# Create and activate a virtual environment
 python -m venv venv
-source venv/bin/activate          # macOS/Linux
-# venv\Scripts\activate           # Windows
-
-# Install dependencies
-pip install -e .
-
-# Configure API key
+source venv/bin/activate
+pip install -e ".[dev]"
 cp .env.example .env
-# Edit .env and set GOOGLE_API_KEY from https://aistudio.google.com/apikey
+# Set GOOGLE_API_KEY in .env
 ```
 
 ---
@@ -94,70 +75,51 @@ cp .env.example .env
 ## Run the Application
 
 ```bash
-# Streamlit UI (MCP server is spawned automatically by ADK McpToolset)
 streamlit run app_ui.py
-```
-
-Optional — run the MCP server standalone for debugging:
-
-```bash
-python app_mcp.py
 ```
 
 ---
 
 ## Example Query Flow
 
-1. Click **Use my location** (or pick **Chitwan Maize Belt**, **Kaski Rice Terraces**, or **Rupandehi Legumes Zone**).
-2. Confirm the suggested nearest zone in the dropdown.
-3. Enter a strategy such as: *"Minimize water use for the next 3 days"*
-4. ADK guardrail validates prompt and region format.
-5. Gemini coordinator calls `fetch_agro_metrics` over MCP stdio (internal ID e.g. `REG-001`).
-6. UI shows irrigation urgency, MCP metrics, actions, risks, and reasoning.
-
-The **Custom Strategy Request** text directly influences the coordinator's Gemini plan.
+1. **Search** a place (e.g. "London, UK") or **click the map** to set your farm location.
+2. Enter crop and field radius; optionally **save** the farm.
+3. Enter a strategy: *"Minimize water use for the next 3 days"*
+4. Guardrail validates prompt and coordinates.
+5. Gemini calls `fetch_location_metrics` (Open-Meteo) via MCP.
+6. UI shows colored urgency, readable plan, weather metrics, export buttons, and plan history.
 
 ---
 
-## Phase 3: Custom Farms & Global Locations
+## Features
 
-Farmers can save farms **anywhere in the world**, view them on a map, and receive irrigation plans from **live Open-Meteo weather** with **crop-specific rules**. Nepal registry zones (`REG-001`–`REG-003`) continue to use mock MCP data.
+### Map & location
+- Interactive map — click to pick (zoom unchanged); search/GPS pan the map.
+- Place search updates map **and** lat/lon fields.
+- Save/load/delete custom farms with persistent SQLite storage.
 
-### Features
+### Irrigation intelligence
+- Live Open-Meteo weather for any global location.
+- Crop profiles: Maize, Rice, Wheat, Legumes, Vegetables, Cotton, Sugarcane, Coffee (+ aliases).
+- Season-aware thresholds (monsoon/dry/temperate) for tropical latitudes.
+- Irrigation volume hints (mm and liters for your field radius).
+- Colored urgency badges (HIGH / MEDIUM / LOW).
 
-- **Save custom farms** with name, crop, center coordinates, and field radius (point + radius boundary).
-- **Map view** (`st.map`) shows Nepal zones and saved custom farms.
-- **Reverse geocoding** via Nominatim fills city/country labels automatically.
-- **One-time GPS** option runs the agent at your current location without saving.
-- **Crop rules** (Maize, Rice, Legumes, Wheat, Vegetables) adjust irrigation urgency thresholds.
+### Reports & history
+- Download irrigation report as **Markdown** or **PDF**.
+- Plan history — last 10 runs per farm stored in SQLite.
 
-### Data sources
+### Reliability & trust
+- Prominent error messages for Open-Meteo and Gemini failures (including quota hints).
+- Soil moisture disclaimer: model estimate, not a field sensor; humidity fallback noted when used.
+- Security guardrail blocks prompt injection and invalid inputs.
 
-| Region type | MCP tool | Data source |
-|-------------|----------|-------------|
-| Nepal zones (`REG-001`–`003`) | `fetch_agro_metrics` | Mock SQLite (in-memory) |
-| Custom farms (`REG-CUST-*`) | `fetch_location_metrics` | Open-Meteo live API |
-| Multi-day planning | `get_weather_forecast` | Open-Meteo live API |
+### MCP tools
 
-Custom farms persist in `data/custom_farms.db` (local, gitignored). Reinstall with `pip install -e .` after pulling to pick up `httpx`.
-
----
-
-## Regions and Geolocation
-
-The UI uses **named Nepal agricultural zones** instead of raw `REG-XXX` codes:
-
-| Zone | District | Crop | Internal ID |
-|------|----------|------|-------------|
-| Chitwan Maize Belt | Chitwan | Maize | REG-001 |
-| Kaski Rice Terraces | Kaski | Rice | REG-002 |
-| Rupandehi Legumes Zone | Rupandehi | Legumes | REG-003 |
-
-- **Use my location** reads browser GPS (via `streamlit-geolocation`) and suggests the nearest zone with distance in km.
-- You must **confirm** the zone in the dropdown before running the agent (manual override is always available).
-- Location requires browser permission; works on `localhost` or HTTPS.
-- Internal `REG-XXX` IDs are still passed to MCP and guardrails unchanged.
-- Registry data lives in `agro_agent/data/regions.json`.
+| Tool | Purpose |
+|------|---------|
+| `fetch_location_metrics` | Live weather + crop-specific urgency at any lat/lon |
+| `get_weather_forecast` | Multi-day forecast for planning |
 
 ---
 
@@ -165,37 +127,41 @@ The UI uses **named Nepal agricultural zones** instead of raw `REG-XXX` codes:
 
 ```text
 agro_agent/
-  config.py       # Settings (GOOGLE_API_KEY, model, MCP path, farms DB)
-  crop_rules.py   # Per-crop moisture thresholds and urgency
-  data/regions.json  # Nepal zone registry (names + coordinates)
-  farms.py        # SQLite CRUD for custom farms (REG-CUST-*)
-  geocode.py      # Nominatim reverse geocoding
-  geo_utils.py    # Coordinate validation, haversine
-  regions.py      # Region lookup, map pins, select options
-  guardrail.py    # security_screen + blocked_output nodes
-  workflow.py     # ADK Workflow graph + coordinator agent
-  runner.py       # Sync/async runner for Streamlit
-app_mcp.py        # FastMCP: Nepal mock + Open-Meteo global tools
-app_ui.py         # Streamlit dashboard with map + farm management
-app_agent.py      # Legacy shim for SecurityGuardrailAgent
-data/custom_farms.db  # Local custom farms (gitignored)
+  config.py         # Settings (API key, model, MCP path, farms DB)
+  crop_rules.py     # Crop profiles, season rules, irrigation math
+  farms.py          # SQLite CRUD for custom farms (REG-CUST-*)
+  plan_history.py   # Last N plan runs per farm
+  report.py         # Markdown/PDF export, urgency formatting
+  geocode.py        # Nominatim reverse + forward geocoding
+  geo_utils.py      # Coordinate validation, haversine
+  map_ui.py         # Folium interactive map
+  regions.py        # Farm map pins and click resolution
+  guardrail.py      # security_screen + blocked_output
+  workflow.py       # ADK Workflow + coordinator agent
+  runner.py         # Sync/async runner for Streamlit
+app_mcp.py          # FastMCP Open-Meteo tools
+app_ui.py           # Streamlit dashboard
+tests/              # pytest unit tests
+.github/workflows/  # CI on push
+data/custom_farms.db  # Local farms + history (gitignored)
+```
+
+---
+
+## Testing
+
+```bash
+pytest -q
 ```
 
 ---
 
 ## Manual Verification Checklist
 
-- [ ] Chitwan / Kaski / Rupandehi names appear in region dropdown
-- [ ] "Use my location" suggests nearest zone with distance; user can override
-- [ ] Save custom farm (GPS or manual lat/lon) → appears on map and in dropdown
-- [ ] Custom farm outside Nepal (e.g. 48.85, 2.35) → reverse geocode shows city/country
-- [ ] Run agent on custom farm → `fetch_location_metrics` + Open-Meteo data in results
-- [ ] Run agent on Chitwan zone → still uses `fetch_agro_metrics` mock data
-- [ ] Crop choice affects urgency (rice vs maize thresholds differ)
-- [ ] Farms persist after Streamlit restart (`data/custom_farms.db`)
-- [ ] `REG-001` + normal prompt → success with Gemini reasoning referencing user intent
-- [ ] Prompt containing `ignore previous instructions` → blocked before LLM/MCP
-- [ ] `MALICIOUS_INPUT` region → blocked at guardrail
-- [ ] Successful run shows metrics from MCP (not hardcoded template)
-- [ ] Missing `GOOGLE_API_KEY` → clear UI error
-- [ ] `python app_mcp.py` starts standalone for debugging
+- [ ] Search "London" → map pans, pin moves, lat/lon fields show ~51.51, -0.13
+- [ ] Run agent → readable plan, colored urgency, weather metrics, disclaimer
+- [ ] Download .md and .pdf reports after a successful run
+- [ ] Save farm → run agent twice → plan history shows entries
+- [ ] Open-Meteo / Gemini errors show prominent UI messages
+- [ ] `pytest -q` passes locally
+- [ ] Prompt with `ignore previous instructions` → blocked at guardrail

@@ -15,9 +15,9 @@ from agro_agent.guardrail import ONE_TIME_REGION_ID
 from agro_agent.workflow import AgroPlanOutput, create_agro_workflow
 
 _RETRY_AFTER_RE = re.compile(r"Please retry in ([\d.]+)s", re.IGNORECASE)
-_METRIC_TOOLS = frozenset(
-    {"fetch_agro_metrics", "fetch_location_metrics", "get_weather_forecast"}
-)
+_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_GUARDRAIL_STATUSES = frozenset({"cleared", "blocked"})
+_METRIC_TOOLS = frozenset({"fetch_location_metrics", "get_weather_forecast"})
 
 
 def _extract_text(content: types.Content | None) -> str:
@@ -30,24 +30,249 @@ def _extract_text(content: types.Content | None) -> str:
     return "\n".join(chunks)
 
 
+def _is_guardrail_payload(raw: Any) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    status = raw.get("status")
+    return status in _GUARDRAIL_STATUSES and "irrigation_urgency" not in raw
+
+
 def _parse_plan_output(raw: Any) -> dict[str, Any]:
     if isinstance(raw, AgroPlanOutput):
         return raw.model_dump()
     if isinstance(raw, dict):
+        if _is_guardrail_payload(raw):
+            return {}
         return raw
     if isinstance(raw, str):
+        parsed = _extract_json_plan_from_text(raw)
+        if parsed:
+            return parsed
+        if raw.strip():
+            return {
+                "reasoning": raw.strip(),
+                "irrigation_urgency": "UNKNOWN",
+                "actions": [],
+                "risks": [],
+            }
+        return {}
+    if raw is None:
+        return {}
+    return {"reasoning": str(raw), "irrigation_urgency": "UNKNOWN", "actions": [], "risks": []}
+
+
+def _extract_json_plan_from_text(text: str) -> dict[str, Any] | None:
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict) and not _is_guardrail_payload(parsed):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    block = _JSON_BLOCK_RE.search(cleaned)
+    if block:
         try:
-            parsed = json.loads(raw)
+            parsed = json.loads(block.group(1))
             if isinstance(parsed, dict):
                 return parsed
         except json.JSONDecodeError:
             pass
-        return {"reasoning": raw, "irrigation_urgency": "UNKNOWN", "actions": [], "risks": []}
-    return {"reasoning": str(raw), "irrigation_urgency": "UNKNOWN", "actions": [], "risks": []}
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            parsed = json.loads(cleaned[start : end + 1])
+            if isinstance(parsed, dict) and not _is_guardrail_payload(parsed):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def _score_plan(plan: dict[str, Any]) -> int:
+    score = 0
+    if (plan.get("reasoning") or "").strip():
+        score += 4
+    actions = plan.get("actions") or []
+    if actions:
+        score += 3 + min(len(actions), 3)
+    risks = plan.get("risks") or []
+    if risks:
+        score += 1
+    if plan.get("irrigation_urgency"):
+        score += 1
+    return score
+
+
+def _plan_candidates_from_events(events: list[Any], terminal_output: Any) -> list[Any]:
+    candidates: list[Any] = []
+
+    def add(candidate: Any) -> None:
+        if candidate is None:
+            return
+        if _is_guardrail_payload(candidate):
+            return
+        candidates.append(candidate)
+
+    add(terminal_output)
+    for event in reversed(events):
+        if getattr(event, "output", None) is not None:
+            add(event.output)
+        text = _extract_text(getattr(event, "content", None))
+        if not text:
+            continue
+        parsed = _extract_json_plan_from_text(text)
+        if parsed:
+            add(parsed)
+        elif len(text.strip()) > 40:
+            add(text)
+
+    return candidates
+
+
+def _build_fallback_reasoning(metrics: dict[str, Any], crop: str) -> str:
+    urgency = metrics.get("irrigation_urgency", "UNKNOWN")
+    soil = metrics.get("current_soil_moisture_pct")
+    rain = metrics.get("forecast_rain_mm_3d")
+    profile = metrics.get("profile_used") or crop
+    soil_txt = f"{soil}%" if soil is not None else "unknown"
+    rain_txt = f"{rain} mm" if rain is not None else "unknown"
+    return (
+        f"Based on live Open-Meteo data for {profile}, soil moisture is {soil_txt} "
+        f"with {rain_txt} of rain forecast over the next 3 days. "
+        f"Baseline urgency is {urgency}; adjust irrigation to conserve water while "
+        f"avoiding crop stress."
+    )
+
+
+def _build_fallback_actions(metrics: dict[str, Any], crop: str) -> list[str]:
+    urgency = (metrics.get("irrigation_urgency") or "MEDIUM").upper()
+    rain = float(metrics.get("forecast_rain_mm_3d") or 0.0)
+    profile = metrics.get("profile_used") or crop
+
+    if urgency == "HIGH":
+        return [
+            f"Schedule irrigation for {profile} within 24 hours — soil moisture is below the safe range.",
+            "Use shorter, more frequent sessions rather than one heavy watering to reduce runoff.",
+            "Re-check soil moisture tomorrow before the next cycle.",
+        ]
+    if urgency == "LOW" or rain >= 15.0:
+        return [
+            f"Delay supplemental irrigation for {profile} — rainfall is likely to cover near-term needs.",
+            "Inspect field drainage after rain to avoid waterlogging.",
+            "Reassess in 2–3 days if dry weather returns.",
+        ]
+    return [
+        f"Monitor {profile} daily; apply light irrigation only if soil surface stays dry.",
+        f"With ~{rain:.0f} mm rain expected in 3 days, reduce manual watering where possible.",
+        "Irrigate in the early morning or evening to limit evaporation.",
+    ]
+
+
+def _build_fallback_risks(metrics: dict[str, Any]) -> list[str]:
+    urgency = (metrics.get("irrigation_urgency") or "").upper()
+    if urgency == "HIGH":
+        return ["Prolonged low soil moisture can reduce yield and increase heat stress."]
+    if urgency == "MEDIUM":
+        return ["Inconsistent watering may cause uneven crop development across the field."]
+    return []
+
+
+def _coordinator_has_plan_content(plan: dict[str, Any]) -> tuple[bool, bool]:
+    has_reasoning = bool((plan.get("reasoning") or "").strip())
+    has_actions = any(str(action).strip() for action in (plan.get("actions") or []))
+    return has_reasoning, has_actions
+
+
+def enrich_plan_with_source(
+    plan: dict[str, Any],
+    metrics: dict[str, Any] | None,
+    crop: str,
+) -> tuple[dict[str, Any], str]:
+    """Fill missing plan fields from MCP metrics and report how the plan was built."""
+    has_reasoning, has_actions = _coordinator_has_plan_content(plan)
+    if not metrics:
+        if has_reasoning or has_actions:
+            return dict(plan), "gemini"
+        return dict(plan), "unknown"
+
+    enriched = dict(plan)
+    filled_reasoning = False
+    filled_actions = False
+
+    if not has_reasoning:
+        enriched["reasoning"] = _build_fallback_reasoning(metrics, crop)
+        filled_reasoning = True
+    if not has_actions:
+        enriched["actions"] = _build_fallback_actions(metrics, crop)
+        filled_actions = True
+    if not enriched.get("risks") and enriched.get("irrigation_urgency", "").upper() != "LOW":
+        enriched["risks"] = _build_fallback_risks(metrics)
+    if not enriched.get("irrigation_urgency"):
+        enriched["irrigation_urgency"] = metrics.get("irrigation_urgency", "UNKNOWN")
+
+    had_gemini = has_reasoning or has_actions
+    used_fallback = filled_reasoning or filled_actions
+    if had_gemini and used_fallback:
+        plan_source = "mixed"
+    elif had_gemini:
+        plan_source = "gemini"
+    elif used_fallback:
+        plan_source = "metrics_fallback"
+    else:
+        plan_source = "unknown"
+    return enriched, plan_source
+
+
+def _enrich_plan_from_metrics(
+    plan: dict[str, Any],
+    metrics: dict[str, Any] | None,
+    crop: str,
+) -> dict[str, Any]:
+    enriched, _ = enrich_plan_with_source(plan, metrics, crop)
+    return enriched
+
+
+def ensure_plan_content(result: dict[str, Any], crop: str) -> dict[str, Any]:
+    """UI/runner safety net: enrich empty plans from metrics and set plan_source."""
+    if result.get("status") != "success":
+        return result
+
+    out = dict(result)
+    data = out.get("data") or {}
+    metrics = data if data and not data.get("error") else None
+    crop_name = (
+        crop
+        or (metrics or {}).get("recommended_crop")
+        or (metrics or {}).get("profile_used")
+        or "Maize"
+    )
+
+    raw_plan = {
+        "reasoning": out.get("reasoning", ""),
+        "actions": out.get("actions") or [],
+        "risks": out.get("risks") or [],
+        "irrigation_urgency": out.get("irrigation_urgency"),
+    }
+    enriched, plan_source = enrich_plan_with_source(raw_plan, metrics, crop_name)
+    out["reasoning"] = enriched.get("reasoning", "")
+    out["actions"] = enriched.get("actions", [])
+    if enriched.get("risks"):
+        out["risks"] = enriched.get("risks", [])
+    if enriched.get("irrigation_urgency"):
+        out["irrigation_urgency"] = enriched.get("irrigation_urgency")
+    out["plan_source"] = plan_source
+    return out
 
 
 def _unwrap_mcp_payload(payload: Any) -> dict[str, Any] | None:
-    if not isinstance(payload, dict) or payload.get("error"):
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("error"):
         return None
     if "region" in payload or "latitude" in payload:
         return payload
@@ -65,6 +290,36 @@ def _unwrap_mcp_payload(payload: Any) -> dict[str, Any] | None:
                 continue
             if isinstance(parsed, dict) and "error" not in parsed:
                 return parsed
+    return None
+
+
+def _extract_mcp_error_from_events(events: list[Any]) -> str | None:
+    for event in reversed(events):
+        content = getattr(event, "content", None)
+        if not content or not content.parts:
+            continue
+        for part in content.parts:
+            response = getattr(part, "function_response", None)
+            if not response or response.name not in _METRIC_TOOLS:
+                continue
+            payload = response.response
+            if isinstance(payload, dict) and payload.get("error"):
+                return str(payload["error"])
+            if isinstance(payload, dict):
+                content_list = payload.get("content")
+                if isinstance(content_list, list):
+                    for item in content_list:
+                        if not isinstance(item, dict) or item.get("type") != "text":
+                            continue
+                        text = item.get("text")
+                        if not isinstance(text, str):
+                            continue
+                        try:
+                            parsed = json.loads(text)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(parsed, dict) and parsed.get("error"):
+                            return str(parsed["error"])
     return None
 
 
@@ -94,18 +349,17 @@ def _extract_metrics_from_events(events: list[Any]) -> dict[str, Any] | None:
 
 
 def _extract_coordinator_plan(events: list[Any], terminal_output: Any) -> dict[str, Any]:
-    candidates: list[Any] = []
-    if terminal_output is not None:
-        candidates.append(terminal_output)
-    for event in reversed(events):
-        if event.output is not None:
-            candidates.append(event.output)
-
-    for raw in candidates:
+    best: dict[str, Any] = {}
+    best_score = -1
+    for raw in _plan_candidates_from_events(events, terminal_output):
         plan = _parse_plan_output(raw)
-        if plan.get("reasoning") or plan.get("irrigation_urgency"):
-            return plan
-    return _parse_plan_output(terminal_output)
+        if not plan:
+            continue
+        score = _score_plan(plan)
+        if score > best_score:
+            best = plan
+            best_score = score
+    return best
 
 
 def _format_workflow_error(exc: Exception, model: str) -> dict[str, Any]:
@@ -120,6 +374,7 @@ def _format_workflow_error(exc: Exception, model: str) -> dict[str, Any]:
         return {
             "status": "error",
             "stage": "coordinator",
+            "error_type": "coordinator",
             "message": (
                 f"Gemini API quota exceeded for model `{model}`.{retry_hint} "
                 "Try `AGRO_MODEL=gemini-2.5-flash` or `gemini-2.5-flash-lite` in `.env`, "
@@ -132,19 +387,10 @@ def _format_workflow_error(exc: Exception, model: str) -> dict[str, Any]:
     return {
         "status": "error",
         "stage": "coordinator",
+        "error_type": "coordinator",
         "message": f"Workflow failed: {message}",
         "pipeline": {"guardrail": "cleared", "coordinator": "failed"},
     }
-
-
-def _resolve_region_mode(region_id: str, region_mode: str | None) -> str:
-    if region_mode:
-        if region_mode == "one_time":
-            return "custom"
-        return region_mode
-    if region_id.startswith("REG-CUST-"):
-        return "custom"
-    return "registry"
 
 
 def _normalize_result(
@@ -158,11 +404,32 @@ def _normalize_result(
             "status": "blocked",
             "message": terminal_output.get("message", "Security violation blocked."),
             "stage": "guardrail",
+            "error_type": "guardrail",
             "pipeline": {"guardrail": "blocked"},
         }
 
     plan = _extract_coordinator_plan(events, terminal_output)
     metrics = _extract_metrics_from_events(events)
+    mcp_error = _extract_mcp_error_from_events(events)
+
+    crop = (metrics or {}).get("recommended_crop") or (metrics or {}).get("profile_used") or "Maize"
+    plan, plan_source = enrich_plan_with_source(plan, metrics, crop)
+
+    if metrics is None and mcp_error:
+        return {
+            "status": "error",
+            "stage": "mcp",
+            "error_type": "weather",
+            "message": (
+                f"Weather API unavailable: {mcp_error} "
+                "Check your connection and try again."
+            ),
+            "pipeline": {
+                "guardrail": "cleared" if guardrail_cleared else "unknown",
+                "mcp": "failed",
+                "coordinator": "skipped",
+            },
+        }
 
     urgency = plan.get("irrigation_urgency") or (
         metrics.get("irrigation_urgency") if metrics else "UNKNOWN"
@@ -180,6 +447,7 @@ def _normalize_result(
         "reasoning": plan.get("reasoning", ""),
         "actions": plan.get("actions", []),
         "risks": plan.get("risks", []),
+        "plan_source": plan_source,
         "data": metrics or {},
     }
 
@@ -203,7 +471,7 @@ async def _run_agro_workflow_async(
     from agro_agent.guardrail import audit_input
     from agro_agent.regions import get_region
 
-    resolved_mode = _resolve_region_mode(region_id, region_mode)
+    resolved_mode = "custom"
     region_meta = get_region(region_id) if region_id != ONE_TIME_REGION_ID else None
 
     if region_meta:
@@ -231,7 +499,6 @@ async def _run_agro_workflow_async(
     is_safe, block_reason = audit_input(
         user_intent,
         region_id,
-        region_mode=resolved_mode,
         latitude=latitude,
         longitude=longitude,
     )
@@ -240,6 +507,7 @@ async def _run_agro_workflow_async(
             "status": "blocked",
             "message": block_reason,
             "stage": "guardrail",
+            "error_type": "guardrail",
             "pipeline": {"guardrail": "blocked"},
         }
 
@@ -251,6 +519,7 @@ async def _run_agro_workflow_async(
                 "Google AI Studio API key: https://aistudio.google.com/apikey"
             ),
             "stage": "config",
+            "error_type": "config",
         }
 
     os.environ["GOOGLE_API_KEY"] = settings.google_api_key  # type: ignore[arg-type]
@@ -330,6 +599,7 @@ async def _run_agro_workflow_async(
             "status": "error",
             "message": "Workflow completed without producing output.",
             "stage": "coordinator",
+            "error_type": "coordinator",
             "pipeline": {"guardrail": "cleared" if guardrail_cleared else "unknown"},
         }
 

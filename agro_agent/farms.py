@@ -151,7 +151,10 @@ def get_farm(region_id: str) -> dict[str, Any] | None:
 
 
 def delete_farm(region_id: str) -> bool:
+    from agro_agent.plan_history import delete_plan_runs_for_farm
+
     init_db()
+    delete_plan_runs_for_farm(region_id)
     conn = _connect()
     try:
         cursor = conn.execute(

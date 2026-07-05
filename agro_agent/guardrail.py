@@ -13,14 +13,13 @@ BANNED_KEYWORDS = [
     r"system prompt",
 ]
 MAX_PROMPT_LENGTH = 2000
-REGISTRY_REGION_PATTERN = re.compile(r"^REG-\d{3}$")
 CUSTOM_REGION_PATTERN = re.compile(r"^REG-CUST-[a-f0-9]{6}$")
 ONE_TIME_REGION_ID = "REG-CUST-000000"
 
 
 def audit_custom_coords(lat: float | None, lon: float | None) -> tuple[bool, str | None]:
     if lat is None or lon is None:
-        return False, "Custom farm requires valid latitude and longitude."
+        return False, "Location requires valid latitude and longitude."
     ok, reason = validate_coordinates(lat, lon)
     if not ok:
         return False, reason
@@ -31,7 +30,7 @@ def audit_input(
     user_prompt: str,
     region_id: str,
     *,
-    region_mode: str = "registry",
+    region_mode: str = "custom",
     latitude: float | None = None,
     longitude: float | None = None,
 ) -> tuple[bool, str | None]:
@@ -42,14 +41,12 @@ def audit_input(
     if "MALICIOUS" in region_id:
         return False, "Region failed format verification."
 
-    if region_mode == "custom":
-        if region_id != ONE_TIME_REGION_ID and not CUSTOM_REGION_PATTERN.match(region_id):
-            return False, "Invalid custom farm ID. Must match REG-CUST-XXXXXX."
-        ok, reason = audit_custom_coords(latitude, longitude)
-        if not ok:
-            return False, reason
-    elif not REGISTRY_REGION_PATTERN.match(region_id):
-        return False, "Invalid region ID format. Must match REG-XXX."
+    if region_id != ONE_TIME_REGION_ID and not CUSTOM_REGION_PATTERN.match(region_id):
+        return False, "Invalid farm ID format. Must match REG-CUST-XXXXXX."
+
+    ok, reason = audit_custom_coords(latitude, longitude)
+    if not ok:
+        return False, reason
 
     for pattern in BANNED_KEYWORDS:
         if re.search(pattern, user_prompt, re.IGNORECASE):
@@ -62,14 +59,12 @@ def audit_input(
 def security_screen(ctx: Context, node_input: Any) -> dict[str, Any]:
     user_intent = str(ctx.state.get("user_intent", ""))
     region_id = str(ctx.state.get("region_id", ""))
-    region_mode = str(ctx.state.get("region_mode", "registry"))
     latitude = ctx.state.get("latitude")
     longitude = ctx.state.get("longitude")
 
     is_safe, reason = audit_input(
         user_intent,
         region_id,
-        region_mode=region_mode,
         latitude=latitude,
         longitude=longitude,
     )
@@ -84,7 +79,7 @@ def security_screen(ctx: Context, node_input: Any) -> dict[str, Any]:
         "stage": "guardrail",
         "user_intent": user_intent,
         "region_id": region_id,
-        "region_mode": region_mode,
+        "region_mode": "custom",
     }
 
 
