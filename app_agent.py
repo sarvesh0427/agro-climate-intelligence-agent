@@ -1,8 +1,9 @@
 # app_agent.py
+# this code setup core system using agentic logic. It includes an input guardrail agent and a coordinator agent.
 import re
 from typing import Dict, Any
 
-# --- SECURITY FEATURE: Prompt Injection & Malicious Content Guardrail ---
+# Security features: Prompt Injection & Malicious Content Guardrail
 class SecurityGuardrailAgent:
     def __init__(self):
         # Prevent common SQL injection and prompt override keywords
