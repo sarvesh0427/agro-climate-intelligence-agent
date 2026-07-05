@@ -1,3 +1,18 @@
+Metadata-Version: 2.4
+Name: agro-climate-intelligence-agent
+Version: 0.2.0
+Summary: ADK 2.0 multi-agent agro-climate irrigation intelligence system
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: google-adk<3,>=2.0.0
+Requires-Dist: httpx>=0.28
+Requires-Dist: mcp>=1.0.0
+Requires-Dist: pydantic>=2.0
+Requires-Dist: pydantic-settings>=2.0
+Requires-Dist: python-dotenv>=1.0
+Requires-Dist: streamlit>=1.30
+Requires-Dist: streamlit-geolocation>=0.0.10
+
 # Agro-Climate Intelligence Agent
 
 ### Production-Grade Multi-Agent Decision Framework for Sustainable Agriculture

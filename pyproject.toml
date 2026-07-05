@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agro-climate-intelligence-agent"
+version = "0.2.0"
+description = "ADK 2.0 multi-agent agro-climate irrigation intelligence system"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-adk>=2.0.0,<3",
+    "httpx>=0.28",
+    "mcp>=1.0.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "streamlit>=1.30",
+    "streamlit-geolocation>=0.0.10",
+]
+
+[tool.setuptools.packages.find]
+include = ["agro_agent*"]
+
+[tool.setuptools.package-data]
+agro_agent = ["data/*.json"]

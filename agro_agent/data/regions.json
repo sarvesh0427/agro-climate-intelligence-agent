@@ -1,0 +1,26 @@
+[
+  {
+    "region_id": "REG-001",
+    "display_name": "Chitwan Maize Belt",
+    "district": "Chitwan",
+    "crop": "Maize",
+    "latitude": 27.529,
+    "longitude": 84.354
+  },
+  {
+    "region_id": "REG-002",
+    "display_name": "Kaski Rice Terraces",
+    "district": "Kaski",
+    "crop": "Rice",
+    "latitude": 28.21,
+    "longitude": 83.986
+  },
+  {
+    "region_id": "REG-003",
+    "display_name": "Rupandehi Legumes Zone",
+    "district": "Rupandehi",
+    "crop": "Legumes",
+    "latitude": 27.518,
+    "longitude": 83.447
+  }
+]
