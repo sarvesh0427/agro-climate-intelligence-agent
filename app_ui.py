@@ -699,3 +699,29 @@ if st.session_state.get("last_result"):
             _render_error_result(result, pipeline)
         else:
             _render_success_result(result, wf, region_meta)
+
+
+st.markdown(
+    """
+    <style>
+    .footer {
+        position: fixed;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: white;
+        color: gray;
+        text-align: center;
+        padding: 10px;
+        font-size: 14px;
+        border-top: 1px solid #ddd;
+        z-index: 100;
+    }
+    </style>
+
+    <div class="footer">
+        Kaggle Capstone Project 2026 | Agro-Climate Intelligence System
+    </div>
+    """,
+    unsafe_allow_html=True
+)
